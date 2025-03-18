@@ -1,0 +1,11 @@
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore environment files
+.env
+chatbotenv/
+
+# Ignore system files
+.DS_Store
