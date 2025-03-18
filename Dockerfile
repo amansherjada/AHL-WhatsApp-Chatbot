@@ -1,17 +1,17 @@
-# Use official Python image as base
+# Use official Python runtime
 FROM python:3.10
 
-# Set working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy all files to the container
-COPY . /app
+# Copy project files
+COPY . .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the port Flask runs on
+# Expose the port Flask will run on
 EXPOSE 8080
 
-# Command to run the app
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8080", "app:app"]
+# Run the application
+CMD ["python", "app_with_firebase.py"]
