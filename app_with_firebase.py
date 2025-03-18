@@ -2,6 +2,7 @@ import os
 import json
 import time
 import logging
+import tempfile
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, Response, render_template
 from dotenv import load_dotenv
@@ -13,31 +14,65 @@ from pinecone import Pinecone
 from langchain_openai import ChatOpenAI
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud import secretmanager
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("app.log"),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-# Check for required environment variables
-required_env_vars = ["OPENAI_API_KEY", "PINECONE_API_KEY"]
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-    raise EnvironmentError(f"Missing required environment variables: {', '.join(missing_vars)}")
+# Function to fetch secrets from Google Secret Manager
+def access_secret(secret_name):
+    """Fetch secret value from Google Secret Manager"""
+    try:
+        client = secretmanager.SecretManagerServiceClient()
+        project_id = "ahl-whatsapp-code"
+        secret_path = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+        response = client.access_secret_version(name=secret_path)
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logger.error(f"Error retrieving secret {secret_name}: {str(e)}")
+        raise e
 
-openai_api_key = os.getenv("OPENAI_API_KEY")
-pinecone_api_key = os.getenv("PINECONE_API_KEY")
-firebase_credential_path = os.getenv("FIREBASE_CREDENTIAL_PATH", "ahl-whatsapp-chatbot-firebase-adminsdk-fbsvc-2d7e73b4b7.json")
+# Check for required secrets
+required_secrets = ["OPENAI_API_KEY", "PINECONE_API_KEY", "FIREBASE_CREDENTIAL_PATH"]
+missing_secrets = [var for var in required_secrets if not access_secret(var)]
+if missing_secrets:
+    logger.error(f"Missing required secrets: {', '.join(missing_secrets)}")
+    raise EnvironmentError(f"Missing required secrets: {', '.join(missing_secrets)}")
+
+# Load API keys from Secret Manager
+openai_api_key = access_secret("OPENAI_API_KEY")
+pinecone_api_key = access_secret("PINECONE_API_KEY")
+firebase_credential_json = access_secret("FIREBASE_CREDENTIAL_PATH")
+
+# Write Firebase credentials to a temporary file
+try:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
+        temp_file.write(firebase_credential_json)
+        firebase_credential_path = temp_file.name  # Get the file path
+        logger.info(f"Temporary Firebase credential file created at {firebase_credential_path}")
+except Exception as e:
+    logger.error(f"Error writing Firebase credentials to file: {str(e)}")
+    raise e
+
+# Initialize Firebase
+try:
+    cred = credentials.Certificate(firebase_credential_path)
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    logger.info("🔥 Firebase initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Error initializing Firebase: {str(e)}")
+    raise e
+
+# Other configurations
 pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "ahlchatbot-customer")
 llm_model = os.getenv("LLM_MODEL", "gpt-4o")
 session_timeout_hours = int(os.getenv("SESSION_TIMEOUT_HOURS", "24"))
